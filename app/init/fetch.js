@@ -3,6 +3,7 @@
 
 import {Platform} from 'react-native';
 import DeviceInfo from 'react-native-device-info';
+import AsyncStorage from '@react-native-community/async-storage';
 import RNFetchBlob from 'rn-fetch-blob';
 import urlParse from 'url-parse';
 
@@ -11,6 +12,7 @@ import {ClientError, HEADER_X_VERSION_ID} from '@mm-redux/client/client4';
 import EventEmitter from '@mm-redux/utils/event_emitter';
 import {General} from '@mm-redux/constants';
 
+import {Ssl} from '@constants';
 import mattermostBucket from 'app/mattermost_bucket';
 import mattermostManaged from 'app/mattermost_managed';
 import LocalConfig from 'assets/config';
@@ -144,10 +146,20 @@ Client4.doFetchWithResponse = async (url, options) => {
     });
 };
 
-const initFetchConfig = async () => {
+const isSslRelaxed = async () => {
+    const serverUrl = Client4.getUrl();
+    const sslWhitelist = await AsyncStorage.getItem(Ssl.SSL_WHITELIST);
+
+    return (serverUrl === sslWhitelist);
+};
+
+export const initFetchConfig = async () => {
+    const trusty = await isSslRelaxed();
+
     const fetchConfig = {
         auto: true,
         timeout: 5000, // Set the base timeout for every request to 5s
+        trusty,
     };
 
     try {

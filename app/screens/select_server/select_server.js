@@ -3,10 +3,12 @@
 
 import React, {PureComponent} from 'react';
 import {Navigation} from 'react-native-navigation';
+import AsyncStorage from '@react-native-community/async-storage';
 import PropTypes from 'prop-types';
 import {intlShape} from 'react-intl';
 import {
     ActivityIndicator,
+    Alert,
     DeviceEventEmitter,
     Image,
     Keyboard,
@@ -26,10 +28,11 @@ import RNFetchBlob from 'rn-fetch-blob';
 import merge from 'deepmerge';
 
 import {Client4} from '@mm-redux/client';
+import {Ssl} from '@constants';
 
 import ErrorText from 'app/components/error_text';
 import FormattedText from 'app/components/formatted_text';
-import fetchConfig from 'app/init/fetch';
+import {fetchConfig, initFetchConfig} from 'app/init/fetch';
 import mattermostBucket from 'app/mattermost_bucket';
 import {GlobalStyles} from 'app/styles';
 import {checkUpgradeType, isUpgradeAvailable} from 'app/utils/client_upgrade';
@@ -96,6 +99,7 @@ export default class SelectServer extends PureComponent {
 
         if (Platform.OS === 'android') {
             Keyboard.addListener('keyboardDidHide', this.handleAndroidKeyboard);
+            this.sslProblemListener = DeviceEventEmitter.addListener('RNFetchBlobMessage', this.handleSslProblem);
         }
 
         this.certificateListener = DeviceEventEmitter.addListener('RNFetchBlobCertificate', this.selectCertificate);
@@ -356,11 +360,47 @@ export default class SelectServer extends PureComponent {
         actions.scheduleExpiredNotification(intl);
     };
 
+    handleSslProblem = () => {
+        if (!this.state.connecting && !this.state.connected) {
+            return null;
+        }
+
+        this.cancelPing();
+
+        const {formatMessage} = this.context.intl;
+        Alert.alert(
+            formatMessage({
+                id: 'mobile.server_ssl.error.title',
+                defaultMessage: 'Server SSL Issue',
+            }),
+            formatMessage({
+                id: 'mobile.server_ssl.error.text',
+                defaultMessage: 'Problem with server\'s SSL certificate.\nDo you accept the risks and want to continue anyway?',
+            }),
+            [
+                {text: 'Yes', onPress: this.addUrlToSslWhitelist},
+                {text: 'No', onPress: this.cancelPing},
+            ],
+            {cancelable: false},
+        );
+        return null;
+    };
+
+    addUrlToSslWhitelist = () => {
+        const {url} = this.state;
+        AsyncStorage.setItem(Ssl.SSL_WHITELIST, url);
+
+        initFetchConfig();
+        this.pingServer(url);
+    };
+
     selectCertificate = () => {
         const url = this.getUrl();
         RNFetchBlob.cba.selectCertificate((certificate) => {
             if (certificate) {
                 mattermostBucket.setPreference('cert', certificate);
+
+                // Does this even work?
                 fetchConfig().then(() => {
                     this.pingServer(url, true);
                 });
